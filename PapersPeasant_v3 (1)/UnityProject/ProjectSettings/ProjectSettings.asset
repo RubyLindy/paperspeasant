@@ -1,0 +1,14 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!129 &1
+PlayerSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 24
+  productGUID: aabbccdd11223344aabbccdd11223344
+  companyName: PapersPeasant
+  productName: Papers Peasant
+  defaultScreenWidth: 640
+  defaultScreenHeight: 360
+  runInBackground: 1
+  resizableWindow: 1
+  activeInputHandler: 0
