@@ -6,9 +6,9 @@ namespace PP
 {
     public class GameManager : MonoBehaviour
     {
-        public static GameManager I { get; private set; }
+        public static GameManager Instance { get; private set; }
 
-        public enum State { Title, Intro, WaitBell, Approaching, Checking, Dismissing, End }
+        public enum State { Title, Intro, WaitBell, Approaching, Checking, Dismissing, End, GameOver }
         public State Current { get; private set; } = State.Title;
 
         public int Coins    { get; private set; } = 20;
@@ -17,24 +17,33 @@ namespace PP
         public int Arrested { get; private set; } = 0;
         public int Day      { get; private set; } = 1;
 
+        // Reason for game over / end of day
+        public enum EndReason { DayComplete, BrokeNegative, WantedSlippedThrough }
+        public EndReason LastEndReason { get; private set; } = EndReason.DayComplete;
+
         public Visitor CurrentVisitor { get; private set; }
 
-        // Events
-        public event System.Action<State>       OnState;
+        public event System.Action<State>        OnState;
         public event System.Action<DialogueLine> OnLine;
         public event System.Action<Visitor>      OnVisitorArrived;
         public event System.Action<Action, bool> OnDecision;
         public event System.Action               OnDayEnd;
 
-        List<Visitor>     _queue;
+        List<Visitor>      _queue;
         List<DialogueLine> _intro;
-        int _qi;
+        int  _qi;
         bool _waitAdv;
+
+        // Wanted criminal names (must match GameData)
+        static readonly HashSet<string> WantedNames = new HashSet<string>
+        {
+            "Garrett Sallow", "Mira Voss", "Dorn Ashwick"
+        };
 
         void Awake()
         {
-            if (I != null) { Destroy(gameObject); return; }
-            I = this;
+            if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+            Instance = this;
             BuildData();
         }
 
@@ -45,34 +54,35 @@ namespace PP
                 new DialogueLine("HEAD GUARD", "Welcome to the gatepost. First day, right? Don't worry — simple job."),
                 new DialogueLine("HEAD GUARD", "Everyone needs a Letter of Passage. Only Emmeloord seals are valid. Forgeries are rampant."),
                 new DialogueLine("HEAD GUARD", "Documents check out — ring the bell, let them in. Something's wrong — call me."),
+                new DialogueLine("HEAD GUARD", "Oh, one more thing — there's a rulebook on your table. Have a look if you get confused. Now stop staring and ring that bell."),
             };
 
             _queue = new List<Visitor>
             {
                 new Visitor {
-                    name = "Willem of Stonebridge", type = ActorType.Farmer, correct = Correct.Accept,
-                    greeting    = "Good morning. Here are my papers. I seek work inside the walls.",
-                    doc = new Document { issuedBy = "Kingdom of Emmeloord", bearer = "Willem of Stonebridge",
-                        purpose = "Seeking employment", validUntil = "Spring's End, 1042", seal = SealType.Valid }
+                    name="Willem of Stonebridge", type=ActorType.Farmer, correct=Correct.Accept,
+                    greeting="Good morning. Here are my papers. I seek work inside the walls.",
+                    doc=new Document{issuedBy="Kingdom of Emmeloord",bearer="Willem of Stonebridge",
+                        purpose="Seeking employment",validUntil="Spring's End, 1042",seal=SealType.Valid}
                 },
                 new Visitor {
-                    name = "Garrett Sallow", type = ActorType.ShadyGuy, correct = Correct.CallGuard,
-                    greeting    = "Aye... papers, yes. Here. Just passing through.",
-                    arrestLine  = "Get your hands off me! I have rights!",
-                    doc = new Document { issuedBy = "Princedom of Vorn", bearer = "Garrett Sallow",
-                        purpose = "Trade and commerce", validUntil = "Midsummer, 1042", seal = SealType.WrongKingdom }
+                    name="Garrett Sallow", type=ActorType.ShadyGuy, correct=Correct.CallGuard,
+                    greeting="Aye... papers, yes. Here. Just passing through.",
+                    arrestLine="Get your hands off me! I have rights!",
+                    doc=new Document{issuedBy="Princedom of Vorn",bearer="Garrett Sallow",
+                        purpose="Trade and commerce",validUntil="Midsummer, 1042",seal=SealType.WrongKingdom}
                 },
                 new Visitor {
-                    name = "Marta the Elder", type = ActorType.Villager, correct = Correct.Accept,
-                    greeting    = "These old bones have walked far. My passage, as required.",
-                    doc = new Document { issuedBy = "Kingdom of Emmeloord", bearer = "Marta of Millfield",
-                        purpose = "Family visit", validUntil = "Autumn, 1042", seal = SealType.Valid }
+                    name="Marta the Elder", type=ActorType.Villager, correct=Correct.Accept,
+                    greeting="These old bones have walked far. My passage, as required.",
+                    doc=new Document{issuedBy="Kingdom of Emmeloord",bearer="Marta of Millfield",
+                        purpose="Family visit",validUntil="Autumn, 1042",seal=SealType.Valid}
                 },
                 new Visitor {
-                    name = "Rodrik the Merchant", type = ActorType.Merchant, correct = Correct.Deny,
-                    greeting    = "Fine goods from the east! Surely a merchant warrants swift entry?",
-                    doc = new Document { issuedBy = "Kingdom of Emmeloord", bearer = "Rodrik of Ashford",
-                        purpose = "Trade", validUntil = "Winter's End, 1041", seal = SealType.Expired }
+                    name="Rodrik the Merchant", type=ActorType.Merchant, correct=Correct.Deny,
+                    greeting="Fine goods from the east! Surely a merchant warrants swift entry?",
+                    doc=new Document{issuedBy="Kingdom of Emmeloord",bearer="Rodrik of Ashford",
+                        purpose="Trade",validUntil="Winter's End, 1041",seal=SealType.Expired}
                 },
             };
         }
@@ -81,8 +91,8 @@ namespace PP
 
         public void StartGame()
         {
-            Coins = 20; Mistakes = 0; Approved = 0; Arrested = 0;
-            _qi = 0; 
+            Coins=20; Mistakes=0; Approved=0; Arrested=0; _qi=0;
+            LastEndReason = EndReason.DayComplete;
             SetState(State.Intro);
             StartCoroutine(RunIntro());
         }
@@ -95,7 +105,7 @@ namespace PP
         public void RingBell()
         {
             if (Current != State.WaitBell) return;
-            if (_qi >= _queue.Count) { StartCoroutine(EndDay()); return; }
+            if (_qi >= _queue.Count) { StartCoroutine(EndDay(EndReason.DayComplete)); return; }
             StartCoroutine(RunVisitor());
         }
 
@@ -103,11 +113,24 @@ namespace PP
         {
             if (Current != State.Checking) return;
             bool ok = Evaluate(a);
-            if (ok) { if (a == Action.Accept) { Coins += 5; Approved++; } else { Coins += 8; Arrested++; } }
-            else    { Coins = Mathf.Max(0, Coins - 10); Mistakes++; }
+
+            if (ok)
+            {
+                if (a == Action.Accept)    { Coins += 5; Approved++; }
+                if (a == Action.CallGuard) { Coins += 8; Arrested++; }
+            }
+            else
+            {
+                Coins = Coins - 10;
+                Mistakes++;
+            }
+
+            // Check if wanted criminal was let through
+            bool wantedSlipped = (a == Action.Accept && WantedNames.Contains(CurrentVisitor.name));
+
             OnDecision?.Invoke(a, ok);
             SetState(State.Dismissing);
-            StartCoroutine(RunDismiss(a, ok));
+            StartCoroutine(RunDismiss(a, ok, wantedSlipped));
         }
 
         // ── Coroutines ──────────────────────────────────────────────────
@@ -139,7 +162,7 @@ namespace PP
             SetState(State.Checking);
         }
 
-        IEnumerator RunDismiss(Action a, bool ok)
+        IEnumerator RunDismiss(Action a, bool ok, bool wantedSlipped)
         {
             if (ok)
             {
@@ -167,6 +190,23 @@ namespace PP
 
             yield return new WaitForSeconds(1.8f);
 
+            // Check game over conditions
+            if (Coins < 0)
+            {
+                yield return new WaitForSeconds(0.5f);
+                StartCoroutine(EndDay(EndReason.BrokeNegative));
+                yield break;
+            }
+
+            if (wantedSlipped)
+            {
+                yield return new WaitForSeconds(0.5f);
+                Emit(new DialogueLine("HEAD GUARD", "That was GARRETT SALLOW — a wanted criminal! He's inside the castle!"));
+                yield return new WaitForSeconds(2f);
+                StartCoroutine(EndDay(EndReason.WantedSlippedThrough));
+                yield break;
+            }
+
             if (_qi < _queue.Count)
             {
                 SetState(State.WaitBell);
@@ -175,18 +215,17 @@ namespace PP
             else
             {
                 yield return new WaitForSeconds(0.5f);
-                StartCoroutine(EndDay());
+                StartCoroutine(EndDay(EndReason.DayComplete));
             }
         }
 
-        IEnumerator EndDay()
+        IEnumerator EndDay(EndReason reason)
         {
+            LastEndReason = reason;
             yield return new WaitForSeconds(0.8f);
             SetState(State.End);
             OnDayEnd?.Invoke();
         }
-
-        // ── Helpers ─────────────────────────────────────────────────────
 
         bool Evaluate(Action a)
         {
