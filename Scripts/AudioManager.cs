@@ -3,8 +3,8 @@ using UnityEngine;
 namespace PP
 {
     /// <summary>
-    /// Handles all game audio. Place on any persistent GameObject.
-    /// Loads WAV clips from Resources/Audio/.
+    /// Place WAV files in Assets/Resources/Audio/
+    /// music_loop.wav, bell.wav, stamp.wav, murmur.wav
     /// </summary>
     public class AudioManager : MonoBehaviour
     {
@@ -15,34 +15,51 @@ namespace PP
 
         void Awake()
         {
-            if (I != null) { Destroy(gameObject); return; }
+            if (I != null && I != this) { Destroy(gameObject); return; }
             I = this;
+            DontDestroyOnLoad(gameObject);
 
-            _music = gameObject.AddComponent<AudioSource>();
+            // Music source - looping, quiet
+            _music        = gameObject.AddComponent<AudioSource>();
             _music.loop   = true;
-            _music.volume = 0.35f;
+            _music.volume = 0.30f;
+            _music.playOnAwake = false;
 
-            _sfx = gameObject.AddComponent<AudioSource>();
+            // SFX source - one-shot
+            _sfx        = gameObject.AddComponent<AudioSource>();
             _sfx.loop   = false;
-            _sfx.volume = 0.8f;
+            _sfx.volume = 0.85f;
+            _sfx.playOnAwake = false;
         }
 
         void Start()
         {
-            var musicClip = Resources.Load<AudioClip>("Audio/music_loop");
-            if (musicClip != null) { _music.clip = musicClip; _music.Play(); }
-            else Debug.LogWarning("[AudioManager] music_loop not found in Resources/Audio/");
+            // Try loading music — WAV must be in Assets/Resources/Audio/
+            var clip = Resources.Load<AudioClip>("Audio/music_loop");
+            if (clip != null)
+            {
+                _music.clip = clip;
+                _music.Play();
+                Debug.Log("[AudioManager] Music started.");
+            }
+            else
+            {
+                Debug.LogWarning("[AudioManager] Could not find Assets/Resources/Audio/music_loop.wav");
+                Debug.LogWarning("[AudioManager] Make sure the file is in Assets/Resources/Audio/ and is imported as AudioClip.");
+            }
         }
 
-        public void PlayBell()    => PlaySFX("Audio/bell");
-        public void PlayStamp()   => PlaySFX("Audio/stamp");
-        public void PlayMurmur()  => PlaySFX("Audio/murmur");
+        public void PlayBell()   => Play("Audio/bell");
+        public void PlayStamp()  => Play("Audio/stamp");
+        public void PlayMurmur() => Play("Audio/murmur");
 
-        void PlaySFX(string path)
+        void Play(string path)
         {
             var clip = Resources.Load<AudioClip>(path);
-            if (clip != null) _sfx.PlayOneShot(clip);
-            else Debug.LogWarning($"[AudioManager] Clip not found: {path}");
+            if (clip != null)
+                _sfx.PlayOneShot(clip);
+            else
+                Debug.LogWarning("[AudioManager] Clip not found: Assets/Resources/" + path + ".wav");
         }
 
         public void SetMusicVolume(float v) => _music.volume = v;
